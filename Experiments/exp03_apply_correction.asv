@@ -1,0 +1,173 @@
+%% exp03_apply_correction.m
+% Build clean ROM, build noisy basis (given sigma), apply trace-I correction,
+% rollout noisy + corrected ROM, plot comparisons and errors.
+
+clear; close all; clc;
+
+%% -------------------- PATH --------------------
+addpath(genpath('../1src'));
+
+%% -------------------- SETTINGS --------------------
+Re      = 1000;
+N       = 208;
+alpha   = 1;
+beta    = 0;
+meanInd = 2;
+
+dt = 1e-2;
+K  = 4000;      % keep moderate while debugging
+r  = 25;
+k0 = 1;
+
+sigma = 1e-6;   % std of noise in WEIGHTED space (constant variance)
+seed  = 3001;
+
+rng(1);
+
+%% -------------------- RESULTS FOLDER --------------------
+ts = datestr(now,'yyyy-mm-dd_HHMMSS');
+OUT = fullfile('..','results','exp03_apply_correction',ts);
+if ~exist(OUT,'dir'), mkdir(OUT); end
+
+%% -------------------- BUILD OS + GENERATOR --------------------
+[A,M,y] = OS_Op(alpha,beta,N,Re,meanInd);
+n = size(A,1);
+
+L   = -1i*(M\A);          % full generator
+Phi = expm(dt*L);         % full propagator (for FOM truth rollout)
+
+% Chebyshev / Clenshaw-Curtis weights (interior)
+w  = clencurt_WeightsB(N);
+W  = diag(sqrt(w));
+W2 = diag(w);
+
+%% -------------------- FOM TRUTH SNAPSHOTS --------------------
+q0 = randn(n,1); q0 = q0/norm(q0);
+
+Qf = zeros(n,K);
+q = q0;
+for k = 1:K
+    q = Phi*q;
+    Qf(:,k) = q;
+end
+t = (0:K-1)'*dt;
+
+%% -------------------- CLEAN ROM (basis + reduced operator) --------------------
+rom = rom_build_clean(Qf, W, W2, L, r, alpha);   % your existing function
+
+Ur0 = rom.Ur;     % clean basis (W2-orth)
+Uall = rom.U;     % all POD modes (state space)
+
+Lr0 = Ur0' * W2 * L * Ur0;       % clean reduced generator
+Pr0 = expm(dt * Lr0);            % clean reduced propagator
+
+fprintf('orth(clean) = %.2e\n', norm(Ur0'*W2*Ur0 - eye(r),'fro'));
+
+%% -------------------- BUILD NOISY BASIS (constant variance on Chebyshev) --------------------
+% Noise is i.i.d. in weighted space: Uw = W*U
+rng(seed);
+
+Uw = W * Uall;
+UwN = Uw + sigma * randn(size(Uw));     % constant variance sigma^2
+UN  = W \ UwN;
+
+UrN = W2_orthonormalize(UN(:,1:r), W);
+
+fprintf('orth(noisy) = %.2e\n', norm(UrN'*W2*UrN - eye(r),'fro'));
+
+%% -------------------- NOISY REDUCED OPERATOR --------------------
+LrN = UrN' * W2 * L * UrN;
+PrN = expm(dt * LrN);
+
+%% -------------------- APPLY TRACE-I CORRECTION (from your slide) --------------------
+trA = trace(L);                     % use the same A you project: here A = L
+bias = (sigma^2) * trA * eye(r);
+
+LrC = LrN - bias;
+PrC = expm(dt * LrC);
+
+fprintf('trace(L)=%.6g%+.6gi\n', real(trA), imag(trA));
+
+%% -------------------- ROLLOUTS (noisy + corrected) --------------------
+QrN = roll(PrN, UrN, W2, Qf, k0);   
+QrC = roll(PrC, UrN, W2, Qf, k0);
+
+%% -------------------- ERRORS (projection + model) --------------------
+[EpN, EmN, rhoN] = err(PrN, UrN, W2, Qf, k0);
+[EpC, EmC, rhoC] = err(PrC, UrN, W2, Qf, k0);
+
+fprintf('rho(PrN)=%.6g, rho(PrC)=%.6g\n', rhoN, rhoC);
+
+%% -------------------- PLOTS --------------------
+idx = round(n/2);
+
+% FOM vs NOISY ROM
+plt_fom_vs_rom_idx(t, Qf, QrN, idx, sprintf('FOM vs NOISY ROM (\\sigma=%.0e)', sigma));
+exportgraphics(gcf, fullfile(OUT, sprintf('fig_idx_noisy_sig_%0.0e.png', sigma)));
+
+% FOM vs CORRECTED ROM
+plt_fom_vs_rom_idx(t, Qf, QrC, idx, sprintf('FOM vs CORRECTED ROM (\\sigma=%.0e)', sigma));
+exportgraphics(gcf, fullfile(OUT, sprintf('fig_idx_corrected_sig_%0.0e.png', sigma)));
+
+% Error comparison: noisy vs corrected (single figure)
+figure('Color','w'); tiledlayout(1,2,'Padding','compact','TileSpacing','compact');
+
+nexttile; hold on; grid on;
+semilogy(t, max(EpN,1e-16), 'r-', 'LineWidth',1.6, 'DisplayName','Proj noisy');
+semilogy(t, max(EpC,1e-16), 'b-', 'LineWidth',1.6, 'DisplayName','Proj corrected');
+xlabel('time'); ylabel('projection error (log)'); title('Projection error');
+legend('Location','best');
+
+nexttile; hold on; grid on;
+semilogy(t, max(EmN,1e-16), 'r-', 'LineWidth',1.6, 'DisplayName',sprintf('Model noisy (\\rho=%.4g)',rhoN));
+semilogy(t, max(EmC,1e-16), 'b-', 'LineWidth',1.6, 'DisplayName',sprintf('Model corr (\\rho=%.4g)',rhoC));
+xlabel('time'); ylabel('model error (log)'); title('Model error');
+legend('Location','best');
+
+exportgraphics(gcf, fullfile(OUT, sprintf('fig_errors_sig_%0.0e.png', sigma)));
+
+% Optional: singular values plot if you already have it
+if exist('plt_svals','file') == 2
+    plt_svals(Qf, W, 60, 1);
+    exportgraphics(gcf, fullfile(OUT, 'fig_svals.png'));
+end
+
+fprintf('\nSaved results to:\n  %s\n', OUT);
+
+%% ===================== LOCAL HELPERS (small names) =====================
+
+function Qr = roll(Pr, Ur, W2, Qf, k0)
+% Rollout with reduced propagator Pr: a_{k+1}=Pr*a_k, qhat=Ur*a
+K = size(Qf,2);
+a = Ur' * W2 * Qf(:,k0);
+Qr = zeros(size(Qf));
+for k = 1:K
+    Qr(:,k) = Ur * a;
+    a = Pr * a;
+end
+end
+
+function [Ep, Em, rho] = err(Pr, Ur, W2, Qf, k0)
+% Projection error Ep and model error Em using propagator Pr in reduced space.
+K = size(Qf,2);
+wn = @(v) sqrt(real(v'*(W2*v)));
+
+rho = max(abs(eig(Pr)));
+
+% projection error (best fit each time)
+Ep = zeros(K,1);
+for k = 1:K
+    qk = Qf(:,k);
+    ak = Ur' * W2 * qk;
+    Ep(k) = wn(qk - Ur*ak) / max(wn(qk), eps);
+end
+
+% model error (evolve a)
+Em = zeros(K,1);
+a = Ur' * W2 * Qf(:,k0);
+for k = 1:K
+    qk = Qf(:,k);
+    Em(k) = wn(qk - Ur*a) / max(wn(qk), eps);
+    a = Pr * a;
+end
+end
