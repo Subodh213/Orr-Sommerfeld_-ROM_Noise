@@ -21,10 +21,13 @@ function rom = rom_build_clean(Q, W, W2, L, r, alpha)
 
     % --- Weighted POD (Hilbert POD) ---
     Xw = W * Q;                 % weighted snapshots
-    [Uw, ~, ~] = svd(Xw, 'econ');
+    [Uw, S, ~] = svd(Xw, 'econ');
 
     U = W \ Uw;                 % POD modes in state space
     rom.U = U;
+
+    rom.s = diag(S);   % weighted singular values
+    rom.S = S;         % optional full diagonal matrix
 
     % --- Build W2-orthonormal reduced basis ---
     Ur = W2_orthonormalize(U(:,1:r), W);
