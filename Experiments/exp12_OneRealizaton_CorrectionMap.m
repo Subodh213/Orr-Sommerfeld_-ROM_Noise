@@ -21,7 +21,7 @@ addpath(genpath('../1src'));
 %% -------------------- SETTINGS --------------------
 Re=1000; N=128; alpha=1; beta=0; meanInd=2;
 dt=1e-2; K=15000;
-r=25; k0=1;
+r=8; k0=1;
 
 sigma = 5e-8;        % std of noise in WEIGHTED space
 seed  = 3001;

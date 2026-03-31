@@ -23,7 +23,7 @@ meanInd = 2;
 N  = 158;
 dt = 1e-2;
 K  = 10000;
-r  = 25;
+r  = 8;
 k0 = 1;
 
 sigma     = 1e-3;   % fixed noise in WEIGHTED space (modes noise)

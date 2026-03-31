@@ -30,6 +30,10 @@ function rom = rom_build_clean(Q, W, W2, L, r, alpha)
     rom.S = S;         % optional full diagonal matrix
 
     % --- Build W2-orthonormal reduced basis ---
+    %This is not really required U is orthonormal is weighted space
+    % i.e, Uw'Uw = I; where Uw = WU or U W2 U = I
+    %But helps in cleaning the roundoff error
+    
     Ur = W2_orthonormalize(U(:,1:r), W);
     rom.Ur = Ur;
 

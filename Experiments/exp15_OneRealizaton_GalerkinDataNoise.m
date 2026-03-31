@@ -1,14 +1,15 @@
-%% exp04_all_plots_DECOMP_ALIGN_REMOVE_DATA_NOISE.m
+%% exp17_DATA_NOISE_NewSubspace.m
 % Noise is added to DATA snapshots Qf (in WEIGHTED space),
 % then POD basis is built from the noisy snapshots.
-
+%New Subspace for projection to reduce A2 term 
+% New Subspace trial 1 by discarding last two modes
 clear; close all; clc;
 addpath(genpath('../1src'));
 
 %% -------------------- SETTINGS --------------------
 Re=1000; N=128; alpha=1; beta=0; meanInd=2;
 dt=1e-2; K=15000;
-r=25; k0=1;
+r=8; k0=1;
 
 %sigma = 5e-8;        % std of noise in WEIGHTED snapshot space (W*Q)
 
@@ -46,7 +47,7 @@ t = (0:K-1)';
 rng(seed);
 
 Xw  = W * Qf;                         % weighted snapshots
-sigma_rel = 5e-8;         
+sigma_rel = 5e-5;         
 sigma = sigma_rel * std(Xw(:));
 fprintf('SIGMA= %.3e\n',sigma);
 XwN = Xw + sigma * randn(size(Xw));
@@ -59,7 +60,7 @@ fprintf('DATA NOISE: ||W(QfN-Qf)||F / ||WQf||F = %.3e\n', ...
 
 %% -------------------- CLEAN ROM (basis + reduced operator) --------------------
 rom0 = rom_build_clean(Qf, W, W2, L, r, alpha);
-
+S=rom0.s;
 Ur0  = rom0.Ur;     % clean W2-orth basis (n×r)
 chk0 = norm(Ur0'*W2*Ur0 - eye(r),'fro');
 fprintf('orth(clean)=%.2e\n', chk0);
@@ -67,6 +68,12 @@ fprintf('orth(clean)=%.2e\n', chk0);
 Lr0 = Ur0' * W2 * L * Ur0;
 Pr0 = expm(dt * Lr0);
 
+figure;
+semilogy(S,'o-','LineWidth',1.5);
+xlabel('Mode index');
+ylabel('Singular value');
+title('POD singular values');
+grid on;
 %% -------------------- NOISY-DATA ROM (basis from QfN) --------------------
 romN = rom_build_clean(QfN, W, W2, L, r, alpha);
 
@@ -101,6 +108,8 @@ fprintf('sigma = %.3e\n', sigma);
 fprintf('||Neff||_F        = %.3e\n', norm(Neff,'fro'));
 fprintf('||Neff||_F/sqrt(r)= %.3e\n', norm(Neff,'fro')/sqrt(r));
 fprintf('max |Neff(:)|     = %.3e\n', max(abs(Neff(:))));
+
+%%
 
 % ---- Decompose LrNa = A0 + A1 + A2 + A3
 A0 = Ur0'  * W2 * L * Ur0;        % clean
@@ -240,14 +249,15 @@ tiledlayout(1,1,'Padding','compact','TileSpacing','compact');
 % ---- Tile 1: trajectory (REAL part) at one location
 nexttile; hold on; grid on;
 plot(t, real(qf),  'k-',  'LineWidth',1.8, 'DisplayName','FOM');
-plot(t, real(qfn),  'c--',  'LineWidth',1.8, 'DisplayName','FOM-NoiseAdded');
-plot(t, real(q0i), 'b--', 'LineWidth',1.6, 'DisplayName','ROM clean');
-plot(t, real(qNi), 'r--', 'LineWidth',1.6, 'DisplayName','ROM noisy');
+%plot(t, real(qfn),  'c--',  'LineWidth',1.8, 'DisplayName','FOM-NoiseAdded');
+plot(t, real(q0i), 'b-', 'LineWidth',2, 'DisplayName','ROM clean');
+plot(t, real(qNi), 'r-', 'LineWidth',2.2, 'DisplayName','ROM noisy');
+
 %plot(t, real(qCi), 'g--', 'LineWidth',1.6, 'DisplayName','ROM noisy-corr');
- plot(t, real(qA1i),'m:',  'LineWidth',1.6, 'DisplayName','ROM (noisy - A1)');
-plot(t, real(qA2i),'c:',  'LineWidth',1.6, 'DisplayName','ROM (noisy - A2)');
- plot(t, real(qLNi),'m--', 'LineWidth',1.6, 'DisplayName','ROM (noisy - (A1+A2))');
-plot(t, real(qQDi),'c--', 'LineWidth',1.6, 'DisplayName','ROM (noisy - A3)');
+ plot(t, real(qA1i),'c--',  'LineWidth',2.1, 'DisplayName','ROM (noisy - A1)');
+plot(t, real(qA2i),'m--',  'LineWidth',1.8, 'DisplayName','ROM (noisy - A2)');
+ %plot(t, real(qLNi),'m--', 'LineWidth',1.6, 'DisplayName','ROM (noisy - (A1+A2))');
+plot(t, real(qQDi),'g--', 'LineWidth',1.8, 'DisplayName','ROM (noisy - A3)');
 xlabel('time'); ylabel(sprintf('Re(q(idx=%d))', idx));
 title('Trajectory at one location');
 legend('Location','best');
@@ -421,8 +431,10 @@ title('A2 : per-mode cosine');
 %% ============================================================
 %  A1 CHANNEL
 % ============================================================
-NX =W * Neff;
-AU =  W*L*Ur0;
+%NX =W * Neff;
+NX = W*L'* Neff;
+%AU =  W*L*Ur0;
+AU = W*Ur0;
 A1hat = NX' * AU;
 
 fprintf('\nA1hat diagnostics (raw):\n');
@@ -437,7 +449,8 @@ tiledlayout(1,2,'Padding','compact','TileSpacing','compact');
 
 nexttile;
 imagesc(abs(NX)); axis tight; colorbar;
-title("|W * Neff|");
+%title("|W * Neff|");
+title("W*L'* Neff");
 xlabel('mode'); ylabel('state index');
 
 nexttile;
@@ -447,7 +460,8 @@ xlabel('mode'); ylabel('state index');
 
 figure('Color','w');
 imagesc(abs(A1hat)); axis tight; colorbar;
-title('|A1|');
+%title('|A1|');
+title("W*Ur0")
 xlabel('mode'); ylabel('mode');
 %%
 dotColA1 = zeros(1,rr);
